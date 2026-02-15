@@ -23,6 +23,10 @@ export async function POST(request: NextRequest) {
     if (!productName) {
       return NextResponse.json({ error: '正式商品名は必須です' }, { status: 400 });
     }
+    const existing = await getProductMasters();
+    if (existing.some((p) => p.productName === productName)) {
+      return NextResponse.json({ error: `「${productName}」は既に登録されています` }, { status: 400 });
+    }
     await addProductMaster({ productName, alias: alias || '', supplier: supplier || '' });
     return NextResponse.json({ success: true });
   } catch (error) {
