@@ -237,9 +237,9 @@ export function parseOrderText(
   }
 
   // store-only ブロックを隣接する items-only ブロックに統合
-  // 後方優先: LINEでは「注文→店舗ラベル」の順が多いため
-  // 両隣とも items-only の場合のみ後方(直前)に統合
-  // 片方が既に店舗割当済みなら安全な方にだけ統合
+  // 後方優先: LINEでは「商品 → 店舗名」の順が多い（店舗名は商品の後に来る）
+  // まず前のブロック（商品群）に店舗がなければそちらに統合
+  // なければ次のブロックに統合
   // どちらも割当済みなら統合しない(store-error のまま)
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
