@@ -216,11 +216,17 @@ export function parseOrderText(
     }
 
     if (c.type === 'store') {
-      if (currentBlock.items.length === 0) {
+      if (currentBlock.items.length === 0 && currentBlock.store === null) {
+        // ブロック内で最初の店舗（商品なし）
         currentBlock.storeIndex = i;
         currentBlock.storePosition = 'before';
         currentBlock.store = c.store;
+      } else if (currentBlock.items.length === 0 && currentBlock.store !== null) {
+        // 店舗が連続（楽㐂→マルコ等）: 前の店舗を別ブロックとして確定
+        blocks.push(currentBlock);
+        currentBlock = { storeIndex: i, storePosition: 'before', store: c.store, items: [] };
       } else {
+        // 商品の後に店舗が来た
         currentBlock.storeIndex = i;
         currentBlock.storePosition = 'after';
         currentBlock.store = c.store;

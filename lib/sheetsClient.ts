@@ -303,6 +303,16 @@ export async function getOrderRows(shippingDate: string): Promise<OrderRow[]> {
   }));
 }
 
+// ==================== スプレッドシートURL ====================
+
+export async function getSheetUrl(sheetName: string): Promise<string> {
+  const sheets = getSheets();
+  const spreadsheetId = getSpreadsheetId();
+  const sheetId = await getSheetId(sheets, spreadsheetId, sheetName);
+  const gidParam = sheetId !== null ? `#gid=${sheetId}` : '';
+  return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit${gidParam}`;
+}
+
 // ==================== ヘルパー ====================
 
 async function getSheetId(

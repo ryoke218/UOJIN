@@ -44,7 +44,11 @@ export async function POST(request: NextRequest) {
     }));
 
     const count = await appendOrderRows(shippingDate, rows);
-    return NextResponse.json({ success: true, count });
+    const spreadsheetId = process.env.SPREADSHEET_ID;
+    const sheetUrl = spreadsheetId
+      ? `https://docs.google.com/spreadsheets/d/${spreadsheetId}`
+      : null;
+    return NextResponse.json({ success: true, count, sheetUrl });
   } catch (error) {
     console.error('Failed to write orders:', error);
     return NextResponse.json({ error: '受注データの書き込みに失敗しました' }, { status: 500 });

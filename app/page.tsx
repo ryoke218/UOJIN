@@ -20,7 +20,6 @@ export default function OrderInputPage() {
   const [parseResult, setParseResult, clearParseResult] = usePersistedState<ParseResult | null>('uojin-result', null);
   const [editableLines, setEditableLines, clearEditableLines] = usePersistedState<ParsedOrderLine[]>('uojin-lines', []);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSubmitted, setIsSubmitted] = useState(false);
   const [submitMessage, setSubmitMessage] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -45,15 +44,23 @@ export default function OrderInputPage() {
     loadMasters();
   }, []);
 
-  // 解析実行
+  // 解析実行（結果を蓄積）
   const handleParse = useCallback(() => {
     if (!text.trim()) return;
     const result = parseOrderText(text, stores, products);
-    setParseResult(result);
-    setEditableLines([...result.lines]);
-    setIsSubmitted(false);
+    // スキップ行・日付アラートも蓄積
+    setParseResult((prev) => {
+      if (!prev) return result;
+      return {
+        lines: [...prev.lines, ...result.lines],
+        dateAlert: result.dateAlert || prev.dateAlert,
+        skippedLines: [...prev.skippedLines, ...result.skippedLines],
+      };
+    });
+    setEditableLines((prev) => [...prev, ...result.lines]);
+    setText('');
     setSubmitMessage('');
-  }, [text, stores, products, setParseResult, setEditableLines]);
+  }, [text, stores, products, setParseResult, setEditableLines, setText]);
 
   // エラー行の店舗名修正
   const handleStoreChange = useCallback((index: number, newStoreName: string) => {
@@ -110,7 +117,6 @@ export default function OrderInputPage() {
     clearParseResult();
     clearEditableLines();
     clearShippingDate();
-    setIsSubmitted(false);
     setSubmitMessage('');
   }, [clearText, clearParseResult, clearEditableLines, clearShippingDate]);
 
@@ -151,7 +157,9 @@ export default function OrderInputPage() {
       const data = await res.json();
       if (data.success) {
         setSubmitMessage(`${data.count}件のデータをスプレッドシートに登録しました`);
-        setIsSubmitted(true);
+        clearText();
+        clearParseResult();
+        clearEditableLines();
       } else {
         setSubmitMessage(`エラー: ${data.error}`);
       }
@@ -163,21 +171,42 @@ export default function OrderInputPage() {
     }
   };
 
+  // スプレッドシートを開く
+  const handleOpenSheet = async () => {
+    try {
+      const res = await fetch(`/api/sheet-url?date=${encodeURIComponent(shippingDate)}`);
+      const data = await res.json();
+      if (data.url) {
+        window.open(data.url, '_blank');
+      }
+    } catch (error) {
+      console.error('Failed to get sheet URL:', error);
+    }
+  };
+
   if (isLoading) {
     return <div className="text-center py-8 text-gray-500">読み込み中...</div>;
   }
 
   return (
     <div className="space-y-4">
-      {/* 発送日 */}
+      {/* 発送日 + スプレッドシートボタン */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">発送日</label>
-        <input
-          type="date"
-          value={shippingDate}
-          onChange={(e) => setShippingDate(e.target.value)}
-          className="w-full border border-gray-300 rounded-lg px-3 py-2"
-        />
+        <div className="flex gap-2">
+          <input
+            type="date"
+            value={shippingDate}
+            onChange={(e) => setShippingDate(e.target.value)}
+            className="flex-1 border border-gray-300 rounded-lg px-3 py-2"
+          />
+          <button
+            onClick={handleOpenSheet}
+            className="px-3 py-2 bg-teal-600 text-white rounded-lg font-medium text-sm min-h-[44px] hover:bg-teal-700 transition-colors whitespace-nowrap"
+          >
+            シートを開く
+          </button>
+        </div>
       </div>
 
       {/* 処理者名 */}
@@ -222,17 +251,17 @@ export default function OrderInputPage() {
       </div>
 
       {/* 解析結果 */}
-      {parseResult && (
+      {(parseResult || editableLines.length > 0) && (
         <div className="space-y-3">
           {/* 日付アラート */}
-          {parseResult.dateAlert && (
+          {parseResult?.dateAlert && (
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 text-sm text-yellow-800">
               メッセージ内に日付の記述があります: 「{parseResult.dateAlert}」
             </div>
           )}
 
           {/* スキップした行 */}
-          {parseResult.skippedLines.length > 0 && (
+          {parseResult?.skippedLines && parseResult.skippedLines.length > 0 && (
             <div className="bg-orange-50 border-2 border-orange-400 rounded-lg px-3 py-3">
               <div className="font-bold text-orange-800 text-sm mb-1">
                 スキップされた行（{parseResult.skippedLines.length}件）
@@ -353,33 +382,21 @@ export default function OrderInputPage() {
             </table>
           </div>
 
-          {/* 送信・出力ボタン */}
-          {/* 出力済みバナー */}
-          {isSubmitted && (
-            <div className="bg-green-100 border border-green-300 rounded-lg px-4 py-3 text-center">
-              <span className="text-green-800 font-bold text-base">出力済み</span>
-            </div>
-          )}
-
-          {/* 送信・出力ボタン */}
+          {/* 送信・集計ボタン */}
           <div className="flex gap-2">
             <button
               onClick={handleSubmit}
-              disabled={isSubmitting || isSubmitted || editableLines.length === 0}
-              className={`flex-1 py-3 text-white rounded-lg font-medium min-h-[44px] transition-colors ${
-                isSubmitted
-                  ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed'
-              }`}
+              disabled={isSubmitting || editableLines.length === 0}
+              className="flex-1 py-3 text-white rounded-lg font-medium min-h-[44px] transition-colors bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
-              {isSubmitting ? '送信中...' : isSubmitted ? '送信済み' : '送信'}
+              {isSubmitting ? '送信中...' : '送信'}
             </button>
             <button
               onClick={() => window.open('/print', '_blank')}
               disabled={editableLines.filter((l) => l.status === 'ok').length === 0}
               className="px-4 py-3 bg-indigo-600 text-white rounded-lg font-medium min-h-[44px] disabled:bg-gray-300 disabled:cursor-not-allowed hover:bg-indigo-700 transition-colors"
             >
-              出力
+              集計
             </button>
           </div>
         </div>
