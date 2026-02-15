@@ -176,8 +176,8 @@ export async function appendOrderRows(shippingDate: string, rows: OrderRow[]): P
   const sheetId = await getSheetId(sheets, spreadsheetId, shippingDate);
 
   if (sheetId === null) {
-    // Create new sheet with header
-    await sheets.spreadsheets.batchUpdate({
+    // Create new sheet
+    const addRes = await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
         requests: [
@@ -189,13 +189,70 @@ export async function appendOrderRows(shippingDate: string, rows: OrderRow[]): P
         ],
       },
     });
+    const newSheetId = addRes.data.replies?.[0]?.addSheet?.properties?.sheetId ?? 0;
+
     // Add header row
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `'${shippingDate}'!A1:H1`,
+      range: `'${shippingDate}'!A1:G1`,
       valueInputOption: 'RAW',
       requestBody: {
-        values: [['発送日', '店舗名', '商品名', '数量', '付別名', '発注先', '処理者', '登録日時']],
+        values: [['発送日', '店舗名', '商品名', '数量', '発注先', '処理者', '登録日時']],
+      },
+    });
+
+    // Apply formatting
+    const colWidths = [100, 120, 160, 80, 100, 80, 140]; // A-G
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          // Column widths
+          ...colWidths.map((px, i) => ({
+            updateDimensionProperties: {
+              range: { sheetId: newSheetId, dimension: 'COLUMNS' as const, startIndex: i, endIndex: i + 1 },
+              properties: { pixelSize: px },
+              fields: 'pixelSize',
+            },
+          })),
+          // Header row: background color (dark blue)
+          {
+            repeatCell: {
+              range: { sheetId: newSheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 7 },
+              cell: {
+                userEnteredFormat: {
+                  backgroundColor: { red: 0.2, green: 0.4, blue: 0.7 },
+                  textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 }, fontSize: 10 },
+                  horizontalAlignment: 'CENTER',
+                  verticalAlignment: 'MIDDLE',
+                },
+              },
+              fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)',
+            },
+          },
+          // Header row height
+          {
+            updateDimensionProperties: {
+              range: { sheetId: newSheetId, dimension: 'ROWS' as const, startIndex: 0, endIndex: 1 },
+              properties: { pixelSize: 32 },
+              fields: 'pixelSize',
+            },
+          },
+          // Freeze header row
+          {
+            updateSheetProperties: {
+              properties: { sheetId: newSheetId, gridProperties: { frozenRowCount: 1 } },
+              fields: 'gridProperties.frozenRowCount',
+            },
+          },
+          // Border around header
+          {
+            updateBorders: {
+              range: { sheetId: newSheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 7 },
+              bottom: { style: 'SOLID_MEDIUM', color: { red: 0.15, green: 0.3, blue: 0.55 } },
+            },
+          },
+        ],
       },
     });
   }
@@ -206,7 +263,6 @@ export async function appendOrderRows(shippingDate: string, rows: OrderRow[]): P
     row.storeName,
     row.productName,
     row.quantity,
-    row.alias,
     row.supplier,
     row.processor,
     row.registeredAt,
@@ -214,12 +270,37 @@ export async function appendOrderRows(shippingDate: string, rows: OrderRow[]): P
 
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: `'${shippingDate}'!A:H`,
+    range: `'${shippingDate}'!A:G`,
     valueInputOption: 'RAW',
     requestBody: { values },
   });
 
   return rows.length;
+}
+
+export async function getOrderRows(shippingDate: string): Promise<OrderRow[]> {
+  const sheets = getSheets();
+  const spreadsheetId = getSpreadsheetId();
+
+  const sheetId = await getSheetId(sheets, spreadsheetId, shippingDate);
+  if (sheetId === null) return [];
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `'${shippingDate}'!A:G`,
+  });
+  const rows = res.data.values;
+  if (!rows || rows.length <= 1) return [];
+
+  return rows.slice(1).map((row) => ({
+    shippingDate: row[0] || '',
+    storeName: row[1] || '',
+    productName: row[2] || '',
+    quantity: row[3] || '',
+    supplier: row[4] || '',
+    processor: row[5] || '',
+    registeredAt: row[6] || '',
+  }));
 }
 
 // ==================== ヘルパー ====================

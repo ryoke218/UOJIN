@@ -20,6 +20,7 @@ export default function OrderInputPage() {
   const [parseResult, setParseResult, clearParseResult] = usePersistedState<ParseResult | null>('uojin-result', null);
   const [editableLines, setEditableLines, clearEditableLines] = usePersistedState<ParsedOrderLine[]>('uojin-lines', []);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
   const [submitMessage, setSubmitMessage] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -50,6 +51,7 @@ export default function OrderInputPage() {
     const result = parseOrderText(text, stores, products);
     setParseResult(result);
     setEditableLines([...result.lines]);
+    setIsSubmitted(false);
     setSubmitMessage('');
   }, [text, stores, products, setParseResult, setEditableLines]);
 
@@ -108,6 +110,7 @@ export default function OrderInputPage() {
     clearParseResult();
     clearEditableLines();
     clearShippingDate();
+    setIsSubmitted(false);
     setSubmitMessage('');
   }, [clearText, clearParseResult, clearEditableLines, clearShippingDate]);
 
@@ -148,9 +151,7 @@ export default function OrderInputPage() {
       const data = await res.json();
       if (data.success) {
         setSubmitMessage(`${data.count}件のデータをスプレッドシートに登録しました`);
-        setText('');
-        setParseResult(null);
-        setEditableLines([]);
+        setIsSubmitted(true);
       } else {
         setSubmitMessage(`エラー: ${data.error}`);
       }
@@ -232,8 +233,17 @@ export default function OrderInputPage() {
 
           {/* スキップした行 */}
           {parseResult.skippedLines.length > 0 && (
-            <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-500">
-              スキップ: {parseResult.skippedLines.join(' / ')}
+            <div className="bg-orange-50 border-2 border-orange-400 rounded-lg px-3 py-3">
+              <div className="font-bold text-orange-800 text-sm mb-1">
+                スキップされた行（{parseResult.skippedLines.length}件）
+              </div>
+              <ul className="space-y-1">
+                {parseResult.skippedLines.map((line, i) => (
+                  <li key={i} className="text-sm text-orange-900 bg-orange-100 rounded px-2 py-1">
+                    {line}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
@@ -296,32 +306,14 @@ export default function OrderInputPage() {
 
                       {/* 商品名 */}
                       <td className="px-2 py-2 border-b">
-                        {isProductError ? (
-                          <select
-                            value={line.productName}
-                            onChange={(e) => {
-                              const selected = products.find((p) => p.productName === e.target.value);
-                              handleProductChange(i, e.target.value, selected?.alias || '', selected?.supplier || '');
-                            }}
-                            className="w-full border border-red-300 rounded px-1 py-1 bg-red-50 text-sm"
-                          >
-                            <option value={line.productName}>
-                              {line.productName}（未登録）
-                            </option>
-                            {products.map((p) => (
-                              <option key={p.productName} value={p.productName}>
-                                {p.productName}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            type="text"
-                            value={line.productName}
-                            onChange={(e) => handleProductChange(i, e.target.value, line.alias, line.supplier)}
-                            className="w-full border border-gray-300 rounded px-1 py-1 text-sm"
-                          />
-                        )}
+                        <input
+                          type="text"
+                          value={line.productName}
+                          onChange={(e) => handleProductChange(i, e.target.value, line.alias, line.supplier)}
+                          className={`w-full border rounded px-1 py-1 text-sm ${
+                            isProductError ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                          }`}
+                        />
                       </td>
 
                       {/* 数量 */}
@@ -362,13 +354,25 @@ export default function OrderInputPage() {
           </div>
 
           {/* 送信・出力ボタン */}
+          {/* 出力済みバナー */}
+          {isSubmitted && (
+            <div className="bg-green-100 border border-green-300 rounded-lg px-4 py-3 text-center">
+              <span className="text-green-800 font-bold text-base">出力済み</span>
+            </div>
+          )}
+
+          {/* 送信・出力ボタン */}
           <div className="flex gap-2">
             <button
               onClick={handleSubmit}
-              disabled={isSubmitting || editableLines.length === 0}
-              className="flex-1 py-3 bg-green-600 text-white rounded-lg font-medium min-h-[44px] disabled:bg-gray-300 disabled:cursor-not-allowed hover:bg-green-700 transition-colors"
+              disabled={isSubmitting || isSubmitted || editableLines.length === 0}
+              className={`flex-1 py-3 text-white rounded-lg font-medium min-h-[44px] transition-colors ${
+                isSubmitted
+                  ? 'bg-gray-400 cursor-not-allowed'
+                  : 'bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed'
+              }`}
             >
-              {isSubmitting ? '送信中...' : '送信'}
+              {isSubmitting ? '送信中...' : isSubmitted ? '送信済み' : '送信'}
             </button>
             <button
               onClick={() => window.open('/print', '_blank')}

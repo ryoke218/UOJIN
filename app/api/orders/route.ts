@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { appendOrderRows } from '@/lib/sheetsClient';
+import { appendOrderRows, getOrderRows } from '@/lib/sheetsClient';
 import { OrderRow } from '@/types/order';
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const shippingDate = searchParams.get('date');
+    if (!shippingDate) {
+      return NextResponse.json({ error: '日付が指定されていません' }, { status: 400 });
+    }
+    const rows = await getOrderRows(shippingDate);
+    return NextResponse.json(rows);
+  } catch (error) {
+    console.error('Failed to read orders:', error);
+    return NextResponse.json({ error: '受注データの読み込みに失敗しました' }, { status: 500 });
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,9 +36,8 @@ export async function POST(request: NextRequest) {
     const rows: OrderRow[] = orders.map((order) => ({
       shippingDate,
       storeName: order.storeName,
-      productName: order.productName,
+      productName: order.alias || order.productName,
       quantity: order.quantity || '',
-      alias: order.alias,
       supplier: order.supplier || '',
       processor: processor || '',
       registeredAt,

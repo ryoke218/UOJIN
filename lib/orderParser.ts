@@ -61,9 +61,17 @@ function normalizeLine(line: string): string {
 
 /**
  * 挨拶文かどうか判定
+ * 挨拶パターンを全て除去した後、残りが短ければ純粋な挨拶文とみなす
  */
 function isGreeting(line: string): boolean {
-  return GREETING_PATTERNS.some((pattern) => line.includes(pattern));
+  if (!GREETING_PATTERNS.some((pattern) => line.includes(pattern))) return false;
+  let remaining = line;
+  for (const pattern of GREETING_PATTERNS) {
+    remaining = remaining.replaceAll(pattern, '');
+  }
+  // 句読点・記号・空白を除去して、実質的な内容が残っているか判定
+  remaining = remaining.replace(/[、。！？\s　・「」『』（）(),.!?\-―]/g, '').trim();
+  return remaining.length === 0;
 }
 
 /**
@@ -200,7 +208,8 @@ export function parseOrderText(
           blocks.push(currentBlock);
           currentBlock = { storeIndex: null, storePosition: null, store: null, items: [] };
         }
-      } else if (isGreeting(raw)) {
+      } else if (!isGreeting(raw)) {
+        // 挨拶文以外のスキップ行を記録（タイムスタンプ行など）
         skippedLines.push(raw);
       }
       continue;

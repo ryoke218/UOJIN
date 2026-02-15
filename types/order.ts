@@ -7,7 +7,7 @@ export interface StoreMaster {
 // 商品マスタ
 export interface ProductMaster {
   productName: string;  // 正式商品名
-  alias: string;        // 付別名
+  alias: string;        // 変換名
   supplier: string;     // 発注先
 }
 
@@ -16,7 +16,7 @@ export interface ParsedOrderLine {
   storeName: string;       // 店舗名（正式名）
   productName: string;     // 商品名
   quantity: string;        // 数量（商品名以降のテキストそのまま）
-  alias: string;           // 付別名（商品マスタから）
+  alias: string;           // 変換名（商品マスタから）
   supplier: string;        // 発注先（商品マスタから）
   status: 'ok' | 'store-error' | 'product-error' | 'both-error';
   rawText: string;         // 元テキスト
@@ -26,9 +26,8 @@ export interface ParsedOrderLine {
 export interface OrderRow {
   shippingDate: string;    // 発送日
   storeName: string;       // 店舗名（正式名）
-  productName: string;     // 商品名
+  productName: string;     // 商品名（変換名優先）
   quantity: string;        // 数量
-  alias: string;           // 付別名
   supplier: string;        // 発注先
   processor: string;       // 処理者
   registeredAt: string;    // 登録日時

@@ -141,7 +141,7 @@ export default function ProductsPage() {
             type="text"
             value={newAlias}
             onChange={(e) => setNewAlias(e.target.value)}
-            placeholder="付別名（任意）"
+            placeholder="変換名（任意）"
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
           />
           <input
@@ -179,7 +179,7 @@ export default function ProductsPage() {
             <thead>
               <tr className="bg-gray-50">
                 <th className="text-left px-3 py-2 border-b font-medium">正式商品名</th>
-                <th className="text-left px-3 py-2 border-b font-medium">付別名</th>
+                <th className="text-left px-3 py-2 border-b font-medium">変換名</th>
                 <th className="text-left px-3 py-2 border-b font-medium">発注先</th>
                 <th className="text-center px-2 py-2 border-b font-medium w-20">操作</th>
               </tr>
