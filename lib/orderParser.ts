@@ -74,6 +74,22 @@ function isGreeting(line: string): boolean {
   return remaining.length === 0;
 }
 
+/**
+ * 注文前文かどうか判定
+ * 「本日の注文お願いします」「明日のご注文よろしくお願いします」等
+ */
+function isOrderPreamble(line: string): boolean {
+  const preambleBase = /^(本日|明日|今日|明後日)?(の)?(ご)?(注文|発注)(を)?/;
+  if (!preambleBase.test(line)) return false;
+  const afterPreamble = line.replace(preambleBase, '');
+  let remaining = afterPreamble;
+  for (const pattern of GREETING_PATTERNS) {
+    remaining = remaining.replaceAll(pattern, '');
+  }
+  remaining = remaining.replace(/[、。！？\s　・「」『』（）(),.!?\-―]/g, '').trim();
+  return remaining.length === 0;
+}
+
 // 店舗名の後ろに付く敬称・接尾辞
 const STORE_SUFFIXES = ['さん', 'さんです', 'です', '様'];
 
@@ -145,6 +161,7 @@ function detectDateKeywords(text: string): string | null {
 // 行の分類結果
 type ClassifiedLine =
   | { type: 'skip' }
+  | { type: 'boundary' }  // メッセージ境界（LINEタイムスタンプ行等）
   | { type: 'store'; store: StoreMaster }
   | { type: 'product'; product: ProductMaster; quantity: string; rawText: string }
   | { type: 'unknown'; rawText: string };
@@ -163,19 +180,20 @@ function classifyLine(
   if (normalized === '') return { type: 'skip' };
 
   // LINEタイムスタンプ行を最優先で判定（"10:08 原 勇樹 ゆもとさん"）
+  // タイムスタンプ行は新メッセージの開始を示すため、店舗以外はboundary（セグメント分割点）として扱う
   if (LINE_TIMESTAMP_REGEX.test(normalized)) {
     const afterTime = normalized.replace(LINE_TIMESTAMP_REGEX, '').trim();
-    // 本文部分が挨拶文 → スキップ
-    if (isGreeting(afterTime)) return { type: 'skip' };
     // 本文の末尾に店舗名が含まれるかチェック（敬称付き対応）
     const storeInTimestamp = findStoreAtEnd(afterTime, stores);
     if (storeInTimestamp) return { type: 'store', store: storeInTimestamp };
-    // それ以外のタイムスタンプ行はスキップ
-    return { type: 'skip' };
+    // 店舗名を含まないタイムスタンプ行 → メッセージ境界
+    return { type: 'boundary' };
   }
 
-  // 挨拶文
-  if (isGreeting(normalized)) return { type: 'skip' };
+  // 挨拶文・注文前文 → メッセージ境界として扱う
+  // タイムスタンプがない場合でも「宜しくお願いします」「お世話になります」等がセグメント分割点になる
+  if (isGreeting(normalized)) return { type: 'boundary' };
+  if (isOrderPreamble(normalized)) return { type: 'boundary' };
 
   // 店舗マスタに完全一致
   const store = findStore(normalized, stores);
@@ -217,11 +235,12 @@ export function parseOrderText(
   const dateAlert = detectDateKeywords(text);
   const skippedLines: string[] = [];
 
-  // Step 1: フラットシーケンス構築（skip行を除外）
+  // Step 1: フラットシーケンス構築（skip行を除外、boundary行はセグメント分割点として保持）
   type FlatItem =
     | { type: 'store'; store: StoreMaster }
     | { type: 'product'; product: ProductMaster; quantity: string; rawText: string }
-    | { type: 'unknown'; rawText: string };
+    | { type: 'unknown'; rawText: string }
+    | { type: 'boundary' };
 
   const flatItems: FlatItem[] = [];
 
@@ -229,9 +248,13 @@ export function parseOrderText(
     const c = classified[i];
     if (c.type === 'skip') {
       const raw = normalizeLine(lines[i]);
-      if (raw !== '' && !isGreeting(raw)) {
+      if (raw !== '') {
         skippedLines.push(raw);
       }
+      continue;
+    }
+    if (c.type === 'boundary') {
+      flatItems.push({ type: 'boundary' });
       continue;
     }
     if (c.type === 'store') {
@@ -261,10 +284,11 @@ export function parseOrderText(
   let segStart = 0;
 
   for (let i = 0; i <= flatItems.length; i++) {
-    if (i === flatItems.length || flatItems[i].type === 'store') {
+    if (i === flatItems.length || flatItems[i].type === 'store' || flatItems[i].type === 'boundary') {
       if (segStart < i) {
         const storeBefore = storeIndices.filter((si) => si < segStart).pop() ?? null;
-        const storeAfter = (i < flatItems.length && flatItems[i].type === 'store') ? i : null;
+        // boundary で分割された場合も、次の店舗を探す
+        const storeAfter = storeIndices.find((si) => si >= i) ?? null;
         segments.push({ start: segStart, end: i - 1, storeBefore, storeAfter });
       }
       segStart = i + 1;
@@ -291,10 +315,16 @@ export function parseOrderText(
 
     if (assignTo !== null) {
       const store = (flatItems[assignTo] as { type: 'store'; store: StoreMaster }).store;
+      let hasProduct = false;
       for (let j = seg.start; j <= seg.end; j++) {
         itemStoreMap.set(j, store);
+        if (flatItems[j].type === 'product') hasProduct = true;
       }
-      storesWithItems.add(assignTo);
+      // unknown行だけのセグメントでは「商品あり」とみなさない
+      // これにより前文テキスト等が店舗割当を狂わせることを防ぐ
+      if (hasProduct) {
+        storesWithItems.add(assignTo);
+      }
     }
   }
 
@@ -303,7 +333,7 @@ export function parseOrderText(
 
   for (let i = 0; i < flatItems.length; i++) {
     const item = flatItems[i];
-    if (item.type === 'store') continue;
+    if (item.type === 'store' || item.type === 'boundary') continue;
 
     const store = itemStoreMap.get(i) ?? null;
 
