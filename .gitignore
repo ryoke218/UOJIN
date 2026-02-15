@@ -24,6 +24,12 @@
 .DS_Store
 *.pem
 
+# service account key
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+
 # debug
 npm-debug.log*
 yarn-debug.log*
