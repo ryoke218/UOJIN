@@ -74,11 +74,38 @@ function isGreeting(line: string): boolean {
   return remaining.length === 0;
 }
 
+// 店舗名の後ろに付く敬称・接尾辞
+const STORE_SUFFIXES = ['さん', 'さんです', 'です', '様'];
+
 /**
- * 店舗マスタから入力名に完全一致するものを探す
+ * 店舗マスタから入力名に一致するものを探す（敬称付きも対応）
  */
 function findStore(line: string, stores: StoreMaster[]): StoreMaster | null {
-  return stores.find((s) => s.inputName === line) ?? null;
+  // 完全一致
+  const exact = stores.find((s) => s.inputName === line);
+  if (exact) return exact;
+  // 敬称を除去して再チェック
+  for (const suffix of STORE_SUFFIXES) {
+    if (line.endsWith(suffix)) {
+      const stripped = line.slice(0, -suffix.length);
+      const match = stores.find((s) => s.inputName === stripped);
+      if (match) return match;
+    }
+  }
+  return null;
+}
+
+/**
+ * テキスト末尾から店舗名を検出（タイムスタンプ行用、敬称付き対応）
+ */
+function findStoreAtEnd(text: string, stores: StoreMaster[]): StoreMaster | null {
+  for (const s of stores) {
+    if (text.endsWith(s.inputName)) return s;
+    for (const suffix of STORE_SUFFIXES) {
+      if (text.endsWith(s.inputName + suffix)) return s;
+    }
+  }
+  return null;
 }
 
 /**
@@ -140,12 +167,9 @@ function classifyLine(
     const afterTime = normalized.replace(LINE_TIMESTAMP_REGEX, '').trim();
     // 本文部分が挨拶文 → スキップ
     if (isGreeting(afterTime)) return { type: 'skip' };
-    // 本文の末尾に店舗名が含まれるかチェック
-    for (const s of stores) {
-      if (afterTime.endsWith(s.inputName)) {
-        return { type: 'store', store: s };
-      }
-    }
+    // 本文の末尾に店舗名が含まれるかチェック（敬称付き対応）
+    const storeInTimestamp = findStoreAtEnd(afterTime, stores);
+    if (storeInTimestamp) return { type: 'store', store: storeInTimestamp };
     // それ以外のタイムスタンプ行はスキップ
     return { type: 'skip' };
   }
@@ -174,6 +198,14 @@ function classifyLine(
 
 /**
  * メイン解析関数
+ *
+ * フラットシーケンス方式:
+ * 1. 全行を分類（店舗/商品/unknown/skip）
+ * 2. skip以外をフラットな配列に並べる
+ * 3. 店舗と店舗の間の商品群を「セグメント」として切り出す
+ * 4. 各セグメントを隣接する店舗に割当:
+ *    - 前の店舗にまだ商品がなければ → 前の店舗（前方割当）
+ *    - 前の店舗に既に商品があれば → 後の店舗（後方割当）
  */
 export function parseOrderText(
   text: string,
@@ -182,125 +214,119 @@ export function parseOrderText(
 ): ParseResult {
   const lines = text.split('\n');
   const classified = lines.map((line) => classifyLine(line, stores, products));
-
-  const result: ParsedOrderLine[] = [];
+  const dateAlert = detectDateKeywords(text);
   const skippedLines: string[] = [];
 
-  const dateAlert = detectDateKeywords(text);
+  // Step 1: フラットシーケンス構築（skip行を除外）
+  type FlatItem =
+    | { type: 'store'; store: StoreMaster }
+    | { type: 'product'; product: ProductMaster; quantity: string; rawText: string }
+    | { type: 'unknown'; rawText: string };
 
-  type Block = {
-    storeIndex: number | null;
-    storePosition: 'before' | 'after' | null;
-    store: StoreMaster | null;
-    items: { index: number; classified: ClassifiedLine }[];
-  };
-
-  const blocks: Block[] = [];
-  let currentBlock: Block = { storeIndex: null, storePosition: null, store: null, items: [] };
+  const flatItems: FlatItem[] = [];
 
   for (let i = 0; i < classified.length; i++) {
     const c = classified[i];
     if (c.type === 'skip') {
       const raw = normalizeLine(lines[i]);
-      // 空行のみブロック区切り（挨拶文やタイムスタンプ行ではブロックを切らない）
-      if (raw === '') {
-        if (currentBlock.items.length > 0 || currentBlock.storeIndex !== null) {
-          blocks.push(currentBlock);
-          currentBlock = { storeIndex: null, storePosition: null, store: null, items: [] };
-        }
-      } else if (!isGreeting(raw)) {
-        // 挨拶文以外のスキップ行を記録（タイムスタンプ行など）
+      if (raw !== '' && !isGreeting(raw)) {
         skippedLines.push(raw);
       }
       continue;
     }
-
     if (c.type === 'store') {
-      if (currentBlock.items.length === 0 && currentBlock.store === null) {
-        // ブロック内で最初の店舗（商品なし）
-        currentBlock.storeIndex = i;
-        currentBlock.storePosition = 'before';
-        currentBlock.store = c.store;
-      } else if (currentBlock.items.length === 0 && currentBlock.store !== null) {
-        // 店舗が連続（楽㐂→マルコ等）: 前の店舗を別ブロックとして確定
-        blocks.push(currentBlock);
-        currentBlock = { storeIndex: i, storePosition: 'before', store: c.store, items: [] };
-      } else {
-        // 商品の後に店舗が来た
-        currentBlock.storeIndex = i;
-        currentBlock.storePosition = 'after';
-        currentBlock.store = c.store;
-        blocks.push(currentBlock);
-        currentBlock = { storeIndex: null, storePosition: null, store: null, items: [] };
-      }
-      continue;
-    }
-
-    currentBlock.items.push({ index: i, classified: c });
-  }
-  if (currentBlock.items.length > 0 || currentBlock.storeIndex !== null) {
-    blocks.push(currentBlock);
-  }
-
-  // store-only ブロックを隣接する items-only ブロックに統合
-  // 後方優先: LINEでは「商品 → 店舗名」の順が多い（店舗名は商品の後に来る）
-  // まず前のブロック（商品群）に店舗がなければそちらに統合
-  // なければ次のブロックに統合
-  // どちらも割当済みなら統合しない(store-error のまま)
-  for (let i = 0; i < blocks.length; i++) {
-    const block = blocks[i];
-    const isStoreOnly = block.store !== null && block.items.length === 0;
-    if (!isStoreOnly) continue;
-
-    const prev = i > 0 ? blocks[i - 1] : null;
-    const next = i < blocks.length - 1 ? blocks[i + 1] : null;
-    const prevNeedsStore = prev !== null && prev.store === null && prev.items.length > 0;
-    const nextNeedsStore = next !== null && next.store === null && next.items.length > 0;
-
-    if (prevNeedsStore) {
-      prev.store = block.store;
-      prev.storeIndex = block.storeIndex;
-      prev.storePosition = 'after';
-      blocks.splice(i, 1);
-      i--;
-    } else if (nextNeedsStore) {
-      next.store = block.store;
-      next.storeIndex = block.storeIndex;
-      next.storePosition = 'before';
-      blocks.splice(i, 1);
-      i--;
+      flatItems.push({ type: 'store', store: c.store });
+    } else if (c.type === 'product') {
+      flatItems.push({ type: 'product', product: c.product, quantity: c.quantity, rawText: c.rawText });
+    } else {
+      flatItems.push({ type: 'unknown', rawText: c.rawText });
     }
   }
 
-  for (const block of blocks) {
-    for (const item of block.items) {
-      const c = item.classified;
+  // Step 2: 店舗位置を特定
+  const storeIndices: number[] = [];
+  for (let i = 0; i < flatItems.length; i++) {
+    if (flatItems[i].type === 'store') storeIndices.push(i);
+  }
 
-      if (c.type === 'product') {
-        const storeName = block.store?.formalName ?? '';
-        const hasStore = block.store !== null;
-        result.push({
-          storeName,
-          productName: c.product.productName,
-          quantity: c.quantity,
-          alias: c.product.alias,
-          supplier: c.product.supplier,
-          status: hasStore ? 'ok' : 'store-error',
-          rawText: c.rawText,
-        });
-      } else if (c.type === 'unknown') {
-        const storeName = block.store?.formalName ?? '';
-        const hasStore = block.store !== null;
-        result.push({
-          storeName,
-          productName: c.rawText,
-          quantity: '',
-          alias: '',
-          supplier: '',
-          status: hasStore ? 'product-error' : 'both-error',
-          rawText: c.rawText,
-        });
+  // Step 3: セグメント（店舗間の商品群）を切り出す
+  type Segment = {
+    start: number;        // flatItems内の開始インデックス
+    end: number;          // flatItems内の終了インデックス
+    storeBefore: number | null;  // セグメント前の店舗（flatItemsインデックス）
+    storeAfter: number | null;   // セグメント後の店舗（flatItemsインデックス）
+  };
+
+  const segments: Segment[] = [];
+  let segStart = 0;
+
+  for (let i = 0; i <= flatItems.length; i++) {
+    if (i === flatItems.length || flatItems[i].type === 'store') {
+      if (segStart < i) {
+        const storeBefore = storeIndices.filter((si) => si < segStart).pop() ?? null;
+        const storeAfter = (i < flatItems.length && flatItems[i].type === 'store') ? i : null;
+        segments.push({ start: segStart, end: i - 1, storeBefore, storeAfter });
       }
+      segStart = i + 1;
+    }
+  }
+
+  // Step 4: セグメントを店舗に割当
+  const itemStoreMap = new Map<number, StoreMaster>();
+  const storesWithItems = new Set<number>();
+
+  for (const seg of segments) {
+    let assignTo: number | null = null;
+
+    if (seg.storeBefore !== null && !storesWithItems.has(seg.storeBefore)) {
+      // 前の店舗にまだ商品がない → 前方割当
+      assignTo = seg.storeBefore;
+    } else if (seg.storeAfter !== null) {
+      // 後方割当（後の店舗に割当）
+      assignTo = seg.storeAfter;
+    } else if (seg.storeBefore !== null) {
+      // 後の店舗がない → 前の店舗に追加
+      assignTo = seg.storeBefore;
+    }
+
+    if (assignTo !== null) {
+      const store = (flatItems[assignTo] as { type: 'store'; store: StoreMaster }).store;
+      for (let j = seg.start; j <= seg.end; j++) {
+        itemStoreMap.set(j, store);
+      }
+      storesWithItems.add(assignTo);
+    }
+  }
+
+  // Step 5: 結果構築
+  const result: ParsedOrderLine[] = [];
+
+  for (let i = 0; i < flatItems.length; i++) {
+    const item = flatItems[i];
+    if (item.type === 'store') continue;
+
+    const store = itemStoreMap.get(i) ?? null;
+
+    if (item.type === 'product') {
+      result.push({
+        storeName: store?.formalName ?? '',
+        productName: item.product.productName,
+        quantity: item.quantity,
+        alias: item.product.alias,
+        supplier: item.product.supplier,
+        status: store ? 'ok' : 'store-error',
+        rawText: item.rawText,
+      });
+    } else {
+      result.push({
+        storeName: store?.formalName ?? '',
+        productName: item.rawText,
+        quantity: '',
+        alias: '',
+        supplier: '',
+        status: store ? 'product-error' : 'both-error',
+        rawText: item.rawText,
+      });
     }
   }
 
