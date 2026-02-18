@@ -31,6 +31,7 @@ export interface OrderRow {
   supplier: string;        // 発注先
   processor: string;       // 処理者
   registeredAt: string;    // 登録日時
+  seqNo?: number;          // 通し番号（サーバーサイドで採番）
 }
 
 // 解析結果全体

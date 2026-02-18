@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { StoreMaster, ProductMaster, ParsedOrderLine, ParseResult } from '@/types/order';
 import { parseOrderText } from '@/lib/orderParser';
 import { usePersistedState } from '@/lib/usePersistedState';
@@ -22,6 +22,15 @@ export default function OrderInputPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // テキストエリア自動リサイズ
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.max(el.scrollHeight, 160) + 'px';
+  }, [text]);
 
   // マスタデータ読み込み
   useEffect(() => {
@@ -206,6 +215,12 @@ export default function OrderInputPage() {
           >
             シートを開く
           </button>
+          <button
+            onClick={() => window.open('/print', '_blank')}
+            className="px-3 py-2 bg-indigo-600 text-white rounded-lg font-medium text-sm min-h-[44px] hover:bg-indigo-700 transition-colors whitespace-nowrap"
+          >
+            集計
+          </button>
         </div>
       </div>
 
@@ -225,11 +240,11 @@ export default function OrderInputPage() {
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">LINEメッセージ</label>
         <textarea
+          ref={textareaRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="LINEの受注メッセージをここに貼り付けてください"
-          rows={10}
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 resize-y"
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 resize-y min-h-[160px]"
         />
       </div>
 
@@ -281,6 +296,7 @@ export default function OrderInputPage() {
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="bg-gray-100">
+                  <th className="text-center px-1 py-2 border-b w-8 text-gray-500">#</th>
                   <th className="text-left px-2 py-2 border-b">店舗</th>
                   <th className="text-left px-2 py-2 border-b">商品</th>
                   <th className="text-left px-2 py-2 border-b">数量</th>
@@ -308,6 +324,8 @@ export default function OrderInputPage() {
                             : i % 2 === 0 ? 'bg-white' : 'bg-gray-50'
                       }
                     >
+                      {/* # */}
+                      <td className="px-1 py-2 border-b text-center text-gray-400 text-sm">{i + 1}</td>
                       {/* 店舗名 */}
                       <td className="px-2 py-2 border-b">
                         {isStoreError ? (
@@ -382,7 +400,7 @@ export default function OrderInputPage() {
             </table>
           </div>
 
-          {/* 送信・集計ボタン */}
+          {/* 送信ボタン */}
           <div className="flex gap-2">
             <button
               onClick={handleSubmit}
@@ -390,13 +408,6 @@ export default function OrderInputPage() {
               className="flex-1 py-3 text-white rounded-lg font-medium min-h-[44px] transition-colors bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
               {isSubmitting ? '送信中...' : '送信'}
-            </button>
-            <button
-              onClick={() => window.open('/print', '_blank')}
-              disabled={editableLines.filter((l) => l.status === 'ok').length === 0}
-              className="px-4 py-3 bg-indigo-600 text-white rounded-lg font-medium min-h-[44px] disabled:bg-gray-300 disabled:cursor-not-allowed hover:bg-indigo-700 transition-colors"
-            >
-              集計
             </button>
           </div>
         </div>

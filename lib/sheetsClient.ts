@@ -194,15 +194,15 @@ export async function appendOrderRows(shippingDate: string, rows: OrderRow[]): P
     // Add header row
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `'${shippingDate}'!A1:G1`,
+      range: `'${shippingDate}'!A1:H1`,
       valueInputOption: 'RAW',
       requestBody: {
-        values: [['発送日', '店舗名', '商品名', '数量', '発注先', '処理者', '登録日時']],
+        values: [['発送日', '店舗名', '商品名', '数量', '発注先', '処理者', '登録日時', 'No.']],
       },
     });
 
     // Apply formatting
-    const colWidths = [100, 120, 160, 80, 100, 80, 140]; // A-G
+    const colWidths = [100, 120, 160, 80, 100, 80, 140, 60]; // A-H
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
       requestBody: {
@@ -218,7 +218,7 @@ export async function appendOrderRows(shippingDate: string, rows: OrderRow[]): P
           // Header row: background color (dark blue)
           {
             repeatCell: {
-              range: { sheetId: newSheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 7 },
+              range: { sheetId: newSheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 8 },
               cell: {
                 userEnteredFormat: {
                   backgroundColor: { red: 0.2, green: 0.4, blue: 0.7 },
@@ -248,7 +248,7 @@ export async function appendOrderRows(shippingDate: string, rows: OrderRow[]): P
           // Border around header
           {
             updateBorders: {
-              range: { sheetId: newSheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 7 },
+              range: { sheetId: newSheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 8 },
               bottom: { style: 'SOLID_MEDIUM', color: { red: 0.15, green: 0.3, blue: 0.55 } },
             },
           },
@@ -257,8 +257,19 @@ export async function appendOrderRows(shippingDate: string, rows: OrderRow[]): P
     });
   }
 
+  // Determine starting seqNo from existing rows
+  let startSeqNo = 1;
+  const existingRes = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `'${shippingDate}'!A:A`,
+  });
+  const existingRows = existingRes.data.values;
+  if (existingRows && existingRows.length > 1) {
+    startSeqNo = existingRows.length; // header row excluded = next number
+  }
+
   // Append data rows
-  const values = rows.map((row) => [
+  const values = rows.map((row, index) => [
     row.shippingDate,
     row.storeName,
     row.productName,
@@ -266,11 +277,12 @@ export async function appendOrderRows(shippingDate: string, rows: OrderRow[]): P
     row.supplier,
     row.processor,
     row.registeredAt,
+    startSeqNo + index,
   ]);
 
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: `'${shippingDate}'!A:G`,
+    range: `'${shippingDate}'!A:H`,
     valueInputOption: 'RAW',
     requestBody: { values },
   });
@@ -287,7 +299,7 @@ export async function getOrderRows(shippingDate: string): Promise<OrderRow[]> {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `'${shippingDate}'!A:G`,
+    range: `'${shippingDate}'!A:H`,
   });
   const rows = res.data.values;
   if (!rows || rows.length <= 1) return [];
@@ -300,6 +312,7 @@ export async function getOrderRows(shippingDate: string): Promise<OrderRow[]> {
     supplier: row[4] || '',
     processor: row[5] || '',
     registeredAt: row[6] || '',
+    seqNo: row[7] ? Number(row[7]) : undefined,
   }));
 }
 

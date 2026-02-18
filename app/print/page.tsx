@@ -55,6 +55,7 @@ export default function PrintPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('supplier');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [copiedGroup, setCopiedGroup] = useState<number | null>(null);
 
   useEffect(() => {
     const dateRaw = sessionStorage.getItem('uojin-date');
@@ -88,6 +89,16 @@ export default function PrintPage() {
 
   const now = new Date();
   const printedAt = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+  const handleCopyOrder = async (group: GroupData, groupIndex: number) => {
+    const lines = group.rows.map((row, i) =>
+      `${i + 1} ${row.productName} ${row.quantity}`
+    );
+    const text = lines.join('\n');
+    await navigator.clipboard.writeText(text);
+    setCopiedGroup(groupIndex);
+    setTimeout(() => setCopiedGroup(null), 2000);
+  };
 
   if (isLoading) {
     return <div className="flex items-center justify-center min-h-screen text-gray-500">読み込み中...</div>;
@@ -171,7 +182,17 @@ export default function PrintPage() {
           <div key={gi} className="mb-5 break-inside-avoid">
             <div className="bg-blue-600 text-white px-3 py-2 rounded-t-lg flex items-center justify-between">
               <span className="font-bold text-base">{group.label}</span>
-              <span className="text-blue-200 text-sm">{group.rows.length}件</span>
+              <div className="flex items-center gap-2">
+                {viewMode === 'supplier' && (
+                  <button
+                    onClick={() => handleCopyOrder(group, gi)}
+                    className="no-print px-2 py-0.5 text-xs rounded bg-white/20 hover:bg-white/30 transition-colors"
+                  >
+                    {copiedGroup === gi ? 'コピー済' : 'コピー'}
+                  </button>
+                )}
+                <span className="text-blue-200 text-sm">{group.rows.length}件</span>
+              </div>
             </div>
 
             <table className="w-full text-sm border-collapse border border-gray-300 border-t-0">
@@ -188,7 +209,7 @@ export default function PrintPage() {
               <tbody>
                 {group.rows.map((row, ri) => (
                   <tr key={ri} className={ri % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                    <td className="px-3 py-1.5 border-b border-r border-gray-300 text-gray-400 text-center">{ri + 1}</td>
+                    <td className="px-3 py-1.5 border-b border-r border-gray-300 text-gray-400 text-center">{row.seqNo ?? ri + 1}</td>
                     {columns.map((col) => (
                       <td key={col.key} className="px-3 py-1.5 border-b border-r border-gray-300 last:border-r-0">
                         {row[col.key]}
